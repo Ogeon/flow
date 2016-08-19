@@ -1,0 +1,15 @@
+[package]
+name = "flow"
+version = "0.0.0"
+authors = ["Erik Hedvall <hello@erikhedvall.nu>"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+parking_lot = "0.2"
+mopa = "0.2"
+
+[dev-dependencies]
+lazy_static = "0.2"
+cursive = "0.2"
+hyper = "0.9"
+threadpool = "1"
