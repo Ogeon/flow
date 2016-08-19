@@ -137,18 +137,15 @@ impl<P> Dispatcher<P> {
     }
 }
 
-impl<'a, P> GenericDispatcher for &'a mut Dispatcher<P> {
+impl<P> GenericDispatcher for Dispatcher<P> {
     type Payload = P;
 
-    fn with_store<S, F, T>(self, action: F) -> Option<T> where
-        S: Store<Payload = P>,
-        F: FnOnce(&S) -> T,
-    {
-        self.get_store().map(|s| action(&s))
+    fn get_store<'a, S: Store<Payload = P>>(&'a mut self) -> Option<Ref<'a, S>> {
+        (*self).get_store()
     }
 
-    fn dispatch(self, payload: P) {
-        self.dispatch(payload);
+    fn dispatch(&mut self, payload: P) {
+        (*self).dispatch(payload);
     }
 }
 
@@ -350,17 +347,14 @@ impl<'a, P> DispatchContext<'a, P> {
     }
 }
 
-impl<'a, 'b, P> GenericDispatcher for &'a mut DispatchContext<'b, P> {
+impl<'a, P> GenericDispatcher for DispatchContext<'a, P> {
     type Payload = P;
 
-    fn with_store<S, F, T>(self, action: F) -> Option<T> where
-        S: Store<Payload = P>,
-        F: FnOnce(&S) -> T,
-    {
-        self.wait_for().map(|s| action(&s))
+    fn get_store<'s, S: Store<Payload = P>>(&'s mut self) -> Option<Ref<'s, S>> {
+        self.wait_for()
     }
 
-    fn dispatch(self, payload: P) {
+    fn dispatch(&mut self, payload: P) {
         self.defer(payload);
     }
 }
@@ -441,12 +435,14 @@ impl<S: Store, F: FnMut(DispatchContext<S::Payload>, &S, &S::Event) + Send + 'st
 ///
 /// impl MessageStore {
 ///     fn get_messages<D>(&self, dispatcher: &mut D) -> Vec<Message> where
-///         for<'a> &'a mut D: GenericDispatcher<Payload = MyPayload>,
+///         D: GenericDispatcher<Payload = MyPayload>,
 ///     {
 ///         self.messages.iter().map(|&(user_id, ref message)| {
 ///             let name = dispatcher
-///                 .with_store(|store: &UserStore| store.get_username(user_id).into())
-///                 .expect("UserStore wasn't registered");
+///                 .get_store::<UserStore>()
+///                 .expect("UserStore wasn't registered")
+///                 .get_username(user_id)
+///                 .into();
 ///
 ///             Message {
 ///                 username: name,
@@ -488,11 +484,12 @@ impl<S: Store, F: FnMut(DispatchContext<S::Payload>, &S, &S::Event) + Send + 'st
 pub trait GenericDispatcher {
     type Payload;
 
-    fn with_store<S, F, T>(self, action: F) -> Option<T> where
-        S: Store<Payload = Self::Payload>,
-        F: FnOnce(&S) -> T;
+    ///Get an immutable reference to a registered store. The dispatcher may
+    ///have to do some computations before the store is ready to be returned.
+    fn get_store<'a, S: Store<Payload = Self::Payload>>(&'a mut self) -> Option<Ref<'a, S>>;
 
-    fn dispatch(self, payload: Self::Payload);
+    ///Dispatch a payload, either immediately or later.
+    fn dispatch(&mut self, payload: Self::Payload);
 }
 
 #[cfg(test)]
