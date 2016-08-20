@@ -44,12 +44,12 @@ use hyper::Client;
 use threadpool::ThreadPool;
 
 lazy_static! {
-    static ref DO: GlobalDispatcher = GlobalDispatcher::new();
+    static ref SITES: GlobalDispatcher = GlobalDispatcher::new();
 }
 
 //A combination of dispatcher and task pool
 struct GlobalDispatcher {
-    dispatcher: RwLock<Dispatcher<Payload>>,
+    dispatcher: RwLock<Dispatcher<SiteAction>>,
     client: Arc<Client>,
     pool: Mutex<ThreadPool>,
     id_counter: AtomicUsize,
@@ -68,15 +68,15 @@ impl GlobalDispatcher {
         }
     }
 
-    fn listen<S: Store<Payload=Payload>, L: Listener<S>>(&self, listener: L) -> Option<ListenerHandle<S>> {
+    fn listen<S: Store<Payload=SiteAction>, L: Listener<S>>(&self, listener: L) -> Option<ListenerHandle<S>> {
         self.dispatcher.write().unwrap().listen(listener)
     }
 
-    fn unlisten<S: Store<Payload=Payload>>(&self, handle: ListenerHandle<S>) {
+    fn unlisten<S: Store<Payload=SiteAction>>(&self, handle: ListenerHandle<S>) {
         self.dispatcher.write().unwrap().unlisten(handle);
     }
 
-    fn dispatch(&self, payload: Payload) {
+    fn dispatch(&self, payload: SiteAction) {
         self.dispatcher.write().unwrap().dispatch(payload);
     }
 
@@ -85,38 +85,38 @@ impl GlobalDispatcher {
         let id = self.id_counter.fetch_add(1, Ordering::SeqCst);
 
         //Notify the dispatcher that a new URL has been added
-        self.dispatch(Payload::Load(id, url.clone()));
+        self.dispatch(SiteAction::Load(id, url.clone()));
 
         //Request the site and report back
         let client = self.client.clone();
         self.pool.lock().unwrap().execute(move || match client.get(&*url).send() {
             Ok(response) => if response.status.is_success() {
-                DO.done_loading(id);
+                SITES.done_loading(id);
             } else {
-                DO.loading_failed(id, response.status.to_string());
+                SITES.loading_failed(id, response.status.to_string());
             },
-            Err(e) => DO.loading_failed(id, e.to_string()),
+            Err(e) => SITES.loading_failed(id, e.to_string()),
         });
     }
 
     //A site was successfully loaded
     fn done_loading(&self, id: usize) {
-        self.dispatch(Payload::DoneLoading(id));
+        self.dispatch(SiteAction::DoneLoading(id));
     }
 
     //A site could not be loaded
     fn loading_failed(&self, id: usize, error: String) {
-        self.dispatch(Payload::LoadingFailed(id, error));
+        self.dispatch(SiteAction::LoadingFailed(id, error));
     }
 
     //Remove a site from the store
     fn remove_site(&self, id: usize) {
-        self.dispatch(Payload::Remove(id));
+        self.dispatch(SiteAction::Remove(id));
     }
 }
 
 //Command payloads for the site store
-enum Payload {
+enum SiteAction {
     Load(usize, String),
     DoneLoading(usize),
     LoadingFailed(usize, String),
@@ -137,32 +137,32 @@ impl Sites {
 }
 
 impl Store for Sites {
-    type Payload = Payload;
+    type Payload = SiteAction;
 
     type Event = ();
 
-    fn handle(&mut self, _context: DispatchContext<Payload>, payload: &Payload) -> Option<()> {
+    fn handle(&mut self, _context: DispatchContext<SiteAction>, payload: &SiteAction) -> Option<()> {
         match *payload {
-            Payload::Load(id, ref url) => {
+            SiteAction::Load(id, ref url) => {
                 self.sites.insert(id, Site {
                     url: url.clone(),
                     status: Status::Loading,
                 });
                 Some(())
             },
-            Payload::DoneLoading(id) => if let Some(site) = self.sites.get_mut(&id) {
+            SiteAction::DoneLoading(id) => if let Some(site) = self.sites.get_mut(&id) {
                 site.status = Status::Done;
                 Some(())
             } else {
                 None
             },
-            Payload::LoadingFailed(id, ref error) => if let Some(site) = self.sites.get_mut(&id) {
+            SiteAction::LoadingFailed(id, ref error) => if let Some(site) = self.sites.get_mut(&id) {
                 site.status = Status::Error(error.clone());
                 Some(())
             } else {
                 None
             },
-            Payload::Remove(id) => {
+            SiteAction::Remove(id) => {
                 self.sites.remove(&id);
                 Some(())
             },
@@ -217,7 +217,7 @@ fn main() {
 
 //Load a site and reset the text field
 fn load_site(ui: &mut Cursive, url: &str) {
-    DO.load_site(url.into());
+    SITES.load_site(url.into());
     if let Some(url_input) = ui.find_id::<EditView>("url_input") {
         //Workaround since set_content seems to crash sometimes
         *url_input = EditView::new().content("https://").on_submit(load_site);
@@ -239,7 +239,7 @@ impl SiteList {
 
         //Set up a listener for updates
         let id = String::from(id);
-        let handle = DO.listen(move |_: DispatchContext<Payload>, store: &Sites, _event: &()| {
+        let handle = SITES.listen(move |_: DispatchContext<SiteAction>, store: &Sites, _event: &()| {
             let sites = store.sites.clone();
             let id = id.clone();
 
@@ -264,7 +264,7 @@ impl SiteList {
                                     ui.add_layer(Dialog::new(TextView::new(&*error)).title("Error!").button("Ok", |ui| ui.pop_layer()));
                                 }))
                             })
-                            .child(Button::new("Remove", move |_| DO.remove_site(id)))
+                            .child(Button::new("Remove", move |_| SITES.remove_site(id)))
                         );
                     }
                 }
@@ -286,7 +286,7 @@ impl ViewWrapper for SiteList {
 //Stop listening for events when dropped
 impl Drop for SiteList {
     fn drop(&mut self) {
-        DO.unlisten(self.handle);
+        SITES.unlisten(self.handle);
     }
 }
 
@@ -308,7 +308,7 @@ impl StatusBar {
             .child(TextView::new("Failed: 0 ").with_id("failed"));
 
         let id_owned = String::from(id);
-        let handle = DO.listen(move |_: DispatchContext<Payload>, store: &Sites, _event: &()| {
+        let handle = SITES.listen(move |_: DispatchContext<SiteAction>, store: &Sites, _event: &()| {
             let mut successful = 0;
             let mut failed = 0;
             let mut pending = 0;
@@ -368,6 +368,6 @@ impl ViewWrapper for StatusBar {
 
 impl Drop for StatusBar {
     fn drop(&mut self) {
-        DO.unlisten(self.handle);
+        SITES.unlisten(self.handle);
     }
 }
