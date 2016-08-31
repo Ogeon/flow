@@ -9,6 +9,7 @@ build = "build.rs"
 [dependencies]
 parking_lot = "0.2"
 mopa = "0.2"
+owning_ref = "0.2"
 
 [dev-dependencies]
 lazy_static = "0.2"

@@ -34,6 +34,7 @@
 extern crate parking_lot;
 #[macro_use]
 extern crate mopa;
+extern crate owning_ref;
 
 use std::collections::{HashMap, VecDeque};
 use std::any::{TypeId, Any};
@@ -42,19 +43,38 @@ use std::fmt;
 use std::ops::Deref;
 
 use parking_lot::{RwLock, RwLockReadGuard, Mutex};
+use owning_ref::StableAddress;
 
-pub struct Ref<'a, S: Store> {
+pub use owning_ref::OwningRef;
+
+///A reference to a store.
+pub type Ref<'a, S> = OwningRef<Guard<'a, S>, S>;
+
+///A read guard for a store. Note that dereferencing performs a hidden
+///downcast.
+pub struct Guard<'a, S: Store> {
     guard: RwLockReadGuard<'a, Box<StoreContainer<S::Payload>>>,
     ty: PhantomData<&'a S>,
 }
 
-impl<'a, S: Store> Deref for Ref<'a, S> {
+impl<'a, S: Store> Guard<'a, S> {
+    fn new(guard: RwLockReadGuard<'a, Box<StoreContainer<S::Payload>>>) -> Guard<'a, S> {
+        Guard {
+            guard: guard,
+            ty: PhantomData,
+        }
+    }
+}
+
+impl<'a, S: Store> Deref for Guard<'a, S> {
     type Target = S;
 
     fn deref(&self) -> &S {
         &self.guard.downcast_ref::<StoreContainerImpl<S>>().expect("a store reference pointed to a store of the wrong type").store
     }
 }
+
+unsafe impl<'a, S: Store> StableAddress for Guard<'a, S> {}
 
 /// The dispatcher sends payloads to stores and notifies listeners.
 pub struct Dispatcher<P> {
@@ -81,10 +101,7 @@ impl<P> Dispatcher<P> {
     /// Get an immutable reference to a store if it's registered.
     pub fn get_store<S: Store<Payload = P>>(&self) -> Option<Ref<S>> {
         self.index.get(&TypeId::of::<S>())
-            .map(|s| Ref {
-                guard: s.store.read(),
-                ty: PhantomData,
-            })
+            .map(|s| OwningRef::new(Guard::new(s.store.read())))
     }
 
     /// Listen for notifications from a store. The returned handle can be used
@@ -320,10 +337,7 @@ impl<'a, P> DispatchContext<'a, P> {
 
                 store.handle(context, self.payload, &mut **entry.listeners.lock());
 
-                Ok(Ref {
-                    guard: store.downgrade(),
-                    ty: PhantomData,
-                })
+                Ok(OwningRef::new(Guard::new(store.downgrade())))
             }).unwrap_or(Err(WaitError::Waiting))
         } else {
             Err(WaitError::Missing)
