@@ -13,7 +13,7 @@ owning_ref = "0.2"
 
 [dev-dependencies]
 lazy_static = "0.2"
-cursive = "0.2"
+cursive = "0.3.2"
 hyper = "0.9"
 threadpool = "1"
 skeptic = "0.5"

@@ -20,12 +20,16 @@ use flow::{
     ListenerHandle,
 };
 
+
+use cursive::{Cursive, With};
+
 use cursive::view::{
     ViewWrapper,
-};
-use cursive::prelude::{
-    Cursive,
     Identifiable,
+    Selector,
+    Finder,
+};
+use cursive::views::{
     LinearLayout,
     TextView,
     ListView,
@@ -34,9 +38,6 @@ use cursive::prelude::{
     Button,
     Dialog,
     IdView,
-    With,
-    View,
-    Selector,
 };
 
 use hyper::Client;
@@ -191,7 +192,7 @@ fn main() {
 
     //Build the UI
     ui.add_layer(
-        Dialog::new(
+        Dialog::around(
             BoxView::with_full_screen(LinearLayout::vertical()
                 .child(BoxView::with_full_height(SiteList::new("site_list", events.clone())))
                 .child(StatusBar::new("site_status", events.clone()))
@@ -219,8 +220,7 @@ fn main() {
 fn load_site(ui: &mut Cursive, url: &str) {
     SITES.load_site(url.into());
     if let Some(url_input) = ui.find_id::<EditView>("url_input") {
-        //Workaround since set_content seems to crash sometimes
-        *url_input = EditView::new().content("https://").on_submit(load_site);
+        url_input.set_content("https://");
     }
 }
 
@@ -261,7 +261,7 @@ impl SiteList {
                             .child(BoxView::with_fixed_height(1, TextView::new(status)).squishable())
                             .with(move |layout| if let Some(error) = error {
                                 layout.add_child(Button::new("Show error", move |ui| {
-                                    ui.add_layer(Dialog::new(TextView::new(&*error)).title("Error!").button("Ok", |ui| ui.pop_layer()));
+                                    ui.add_layer(Dialog::info(&*error).title("Error!"));
                                 }))
                             })
                             .child(Button::new("Remove", move |_| SITES.remove_site(id)))
@@ -280,7 +280,7 @@ impl SiteList {
 
 //This view is just a transparent wrapper.
 impl ViewWrapper for SiteList {
-    wrap_impl!(&self.view);
+    wrap_impl!(self.view: IdView<ListView>);
 }
 
 //Stop listening for events when dropped
@@ -324,16 +324,16 @@ impl StatusBar {
             let id = id_owned.clone();
             events.send(Box::new(move |ui: &mut Cursive| {
                 if let Some(layout) = ui.find_id::<LinearLayout>(&id) {
-                    if let Some(text) = layout.find(&Selector::Id("total")).and_then(|v| v.downcast_mut::<TextView>()) {
+                    if let Some(text) = layout.find_id::<TextView>("total") {
                         text.set_content(format!("Total: {} ", successful + failed + pending));
                     }
-                    if let Some(text) = layout.find(&Selector::Id("pending")).and_then(|v| v.downcast_mut::<TextView>()) {
+                    if let Some(text) = layout.find_id::<TextView>("pending") {
                         text.set_content(format!("Pending: {} ", pending));
                     }
-                    if let Some(text) = layout.find(&Selector::Id("successful")).and_then(|v| v.downcast_mut::<TextView>()) {
+                    if let Some(text) = layout.find_id::<TextView>("successful") {
                         text.set_content(format!("Successful: {} ", successful));
                     }
-                    if let Some(text) = layout.find(&Selector::Id("failed")).and_then(|v| v.downcast_mut::<TextView>()) {
+                    if let Some(text) = layout.find_id::<TextView>("failed") {
                         text.set_content(format!("Failed: {} ", failed));
                     }
                 }
@@ -349,19 +349,14 @@ impl StatusBar {
 }
 
 impl ViewWrapper for StatusBar {
-    wrap_impl!(&self.view);
+    wrap_impl!(self.view: LinearLayout);
 
     //Isolate the content of this view, by making any internal view
     //unreachable from the outside, unless it's through our root view.
-    fn wrap_find(&mut self, selector: &Selector) -> Option<&mut Any> {
-        if let Selector::Id(id) = *selector {
-            if id == &self.id {
-                Some(&mut self.view)
-            } else {
-                None
-            }
-        } else {
-            None
+    fn wrap_find_any(&mut self, selector: &Selector) -> Option<&mut Any> {
+        match *selector {
+            Selector::Id(id) if id == &self.id => Some(&mut self.view),
+            _ => None
         }
     }
 }
