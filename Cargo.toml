@@ -20,3 +20,6 @@ skeptic = "0.5"
 
 [build-dependencies]
 skeptic = "0.5"
+
+[features]
+strict = []

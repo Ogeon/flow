@@ -31,6 +31,9 @@
 //! [store]: trait.Store.html
 //! [listeners]: trait.Listener.html
 
+#![cfg_attr(feature = "strict", deny(missing_docs))]
+#![cfg_attr(feature = "strict", deny(warnings))]
+
 extern crate parking_lot;
 #[macro_use]
 extern crate mopa;
@@ -496,6 +499,7 @@ impl<S: Store, F: FnMut(DispatchContext<S::Payload>, &S, &S::Event) + Send + 'st
 /// # 
 /// ```
 pub trait GenericDispatcher {
+    ///The type of payload that the dispatcher can handle.
     type Payload;
 
     ///Get an immutable reference to a registered store. The dispatcher may
