@@ -247,7 +247,7 @@ impl SiteList {
             events.send(Box::new(move |ui: &mut Cursive| {
                 if let Some(site_list) = ui.find_id::<ListView>(&id) {
                     //Update the list by replacing it
-                    *site_list = ListView::new();
+                    site_list.clear();
 
                     for (&id, site) in &sites {
                         //Get site status string and error message
